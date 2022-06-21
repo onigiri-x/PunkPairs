@@ -3,6 +3,9 @@ import { Contract } from "../../generated/schema";
 
 import { cryptopunks } from "../../generated/cryptopunks/cryptopunks";
 import { WrappedPunks } from "../../generated/WrappedPunks/WrappedPunks";
+import {V1Punks} from "../../generated/V1Punks/V1Punks";
+import {Foobar} from "../../generated/Foobar/Foobar";
+import {PunksOG} from "../../generated/PunksOG/PunksOG";
 
 export function getOrCreateCryptoPunkContract(address: Address): Contract {
   let id = address.toHexString();
@@ -77,6 +80,73 @@ export function getOrCreateWrappedPunkContract(address: Address): Contract {
       contract.totalSupply = totalSupplyCall.value;
     } else {
       log.warning("totalSupplyCall Reverted", []);
+    }
+
+    contract.save();
+  }
+
+  return contract as Contract;
+}
+
+export function getOrCreateV1PunkContract(address: Address): Contract {
+  let id = address.toHexString();
+  let contract = Contract.load(id);
+  let v1Punks = V1Punks.bind(address);
+
+  if (!contract) {
+    contract = new Contract(id);
+    contract.totalAmountTraded = BigInt.fromI32(0);
+    contract.totalSales = BigInt.fromI32(0);
+
+    let symbolCall = v1Punks.try_symbol();
+    if (!symbolCall.reverted) {
+      contract.symbol = symbolCall.value;
+    } else {
+      log.warning("symbolCall Reverted", []);
+    }
+
+    let nameCall = v1Punks.try_name();
+    if (!nameCall.reverted) {
+      contract.name = nameCall.value;
+    } else {
+      log.warning("nameCall Reverted", []);
+    }
+
+    let totalSupplyCall = v1Punks.try_totalSupply();
+    if (!totalSupplyCall.reverted) {
+      contract.totalSupply = totalSupplyCall.value;
+    } else {
+      log.warning("totalSupplyCall Reverted", []);
+    }
+
+    contract.save();
+  }
+
+  return contract as Contract;
+}
+
+export function getOrCreateFoobarContract(address: Address): Contract {
+  let id = address.toHexString();
+  let contract = Contract.load(id);
+  let foobar = Foobar.bind(address);
+
+  if (!contract) {
+    contract = new Contract(id);
+    contract.totalAmountTraded = BigInt.fromI32(0);
+    contract.totalSales = BigInt.fromI32(0);
+
+    let symbolCall = foobar.try_symbol();
+    if (!symbolCall.reverted) {
+      contract.symbol = symbolCall.value;
+    } else {
+      log.warning("symbolCall Reverted", []);
+    }
+
+    let nameCall = foobar.try_name();
+    if (!nameCall.reverted) {
+      contract.name = nameCall.value;
+    } else {
+      log.warning("nameCall Reverted", []);
     }
 
     contract.save();

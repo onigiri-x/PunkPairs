@@ -33,6 +33,12 @@ dataSources:
           file: ./abis/cryptopunks.json
         - name: CryptopunksMetadata
           file: ./abis/CryptopunksMetadata.json
+        - name: V1Punks
+          file: ./abis/v1punks.json
+        - name: PunksOG
+          file: ./abis/punksog.json
+        - name: Foobar
+          file: ./abis/foobar.json
       eventHandlers:
         - event: Assign(indexed address,uint256)
           handler: handleAssign
@@ -71,9 +77,93 @@ dataSources:
       abis:
         - name: WrappedPunks
           file: ./abis/WrappedPunks.json
+        - name: V1Punks
+          file: ./abis/V1Punks.json
+        - name: PunksOG
+          file: ./abis/punksog.json
+        - name: Foobar
+          file: ./abis/foobar.json
       eventHandlers:
         - event: Transfer(indexed address,indexed address,indexed uint256)
           handler: handleWrappedPunkTransfer
         - event: ProxyRegistered(address,address)
           handler: handleProxyRegistered
+      file: ./src/mapping.ts
+  - kind: ethereum/contract
+    name: V1Punks
+    network: mainnet
+    source:
+      address: "0x282bdd42f4eb70e7a9d9f40c8fea0825b7f68c5d"
+      abi: V1Punks
+      startBlock: 14022431
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.5
+      language: wasm/assemblyscript
+      entities:
+        - Transfer
+      abis:
+        - name: V1Punks
+          file: ./abis/V1Punks.json
+        - name: PunksOG
+          file: ./abis/punksog.json
+        - name: Foobar
+          file: ./abis/foobar.json
+      eventHandlers:
+        - event: Transfer(indexed address,indexed address,indexed uint256)
+          handler: handleV1PunkTransfer
+      file: ./src/mapping.ts
+  - kind: ethereum/contract
+    name: Foobar
+    network: mainnet
+    source:
+      address: "0xf4a4644e818c2843ba0aabea93af6c80b5984114"
+      abi: Foobar
+      startBlock: 12105923
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.5
+      language: wasm/assemblyscript
+      entities:
+        - Transfer
+      abis:
+        - name: V1Punks
+          file: ./abis/V1Punks.json
+        - name: PunksOG
+          file: ./abis/punksog.json
+        - name: Foobar
+          file: ./abis/foobar.json
+      eventHandlers:
+        - event: Transfer(indexed address,indexed address,indexed uint256)
+          handler: handleFoobarPunkTransfer
+      file: ./src/mapping.ts
+  - kind: ethereum/contract
+    name: PunksOG
+    network: mainnet
+    source:
+      address: "0x6Ba6f2207e343923BA692e5Cae646Fb0F566DB8D"
+      abi: PunksOG
+      startBlock: 3914495
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.5
+      language: wasm/assemblyscript
+      entities:
+        - PunkTransfer
+      abis:
+        - name: cryptopunks
+          file: ./abis/cryptopunks.json
+        - name: CryptopunksMetadata
+          file: ./abis/CryptopunksMetadata.json
+        - name: V1Punks
+          file: ./abis/v1punks.json
+        - name: PunksOG
+          file: ./abis/punksog.json
+        - name: Foobar
+          file: ./abis/foobar.json
+      eventHandlers:
+        - event: PunkTransfer(indexed address,indexed address,uint256)
+          handler: handleOGPunkTransfer
+        - event: Assign(indexed address,uint256)
+          handler: handleOGAssign
       file: ./src/mapping.ts

@@ -84,6 +84,7 @@ type Punk implements NFT @entity {
   owner: Account!
   wrapped: Boolean!
   events: [Event!]! @derivedFrom(field: "nft")
+  pairedV1: Boolean!
 }
 
 type MetaData @entity {
