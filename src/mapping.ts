@@ -1,18 +1,18 @@
-import { BigInt, Address, Bytes, log } from "@graphprotocol/graph-ts";
+import { Address, BigInt, log } from '@graphprotocol/graph-ts'
 import {
-  Assign as Assigned,
-  PunkTransfer,
-  PunkOffered,
-  PunkBidEntered,
-  PunkBidWithdrawn,
-  PunkBought,
-  PunkNoLongerForSale,
-} from "../generated/cryptopunks/cryptopunks";
-
+	Assign as Assigned,
+	PunkTransfer,
+	PunkOffered,
+	PunkBidEntered,
+	PunkBidWithdrawn,
+	PunkBought,
+	PunkNoLongerForSale,
+	Transfer as cTokenTransfer,
+} from '../generated/cryptopunks/cryptopunks'
 import {
-  Transfer as WrappedPunkTransfer,
-  ProxyRegistered,
-} from "../generated/WrappedPunks/WrappedPunks";
+	Transfer as WrappedPunkTransfer,
+	ProxyRegistered,
+} from '../generated/WrappedPunks/WrappedPunks'
 
 import {
   Transfer as V1PunkTransfer,
@@ -29,65 +29,81 @@ import {
     Assign as OGAssign
 } from "../generated/PunksOG/PunksOG";
 
-import { getTrait } from "./traits";
+import { getTrait } from './traits'
+import { Punk, Trait, MetaData, UserProxy, Ask, Bid } from '../generated/schema'
+import {
+	ZERO_ADDRESS,
+	WRAPPED_PUNK_ADDRESS,
+	BIGINT_ONE,
+	BIGINT_ZERO,
+} from './constant'
+
+import { handleBidNotification } from '../src/helpers/bidHelpers'
+import { handleAskNotification } from './helpers/askHelpers'
 
 import {
-  Account,
-  BidCreated,
-  Punk,
-  Trait,
-  BidRemoved,
-  AskCreated,
-  AskRemoved,
-  MetaData,
-  UserProxy,
-} from "../generated/schema";
+	getOrCreateAccount,
+	updateAccountHoldings,
+} from '../src/helpers/accountHelper'
 
-import { ZERO_ADDRESS, WRAPPED_PUNK_ADDRESS } from "./constant";
+import { createMetadata } from './helpers/metadataHelper'
+import { getOrCreateTransfer } from './helpers/transferHelper'
+import { getOrCreateAssign } from './helpers/assignHelper'
 import {
-  getOrCreateAccount,
-  getOrCreateMetadata,
-  getOrCreateAssign,
-  getOrCreateSale,
-  getOrCreateTransfer,
-} from "./helpers/entityHelper";
+	getOwnerFromCToken,
+	getOrCreateCToken,
+	convertPriceToBigDecimal,
+} from './utils'
 
 import {
-  getOrCreateCryptoPunkContract,
-  getOrCreateWrappedPunkContract,
-  getOrCreateV1PunkContract,
-  getOrCreateFoobarContract
-} from "../src/helpers/contractHelper";
+	updatePunkOwner,
+	updatePunkSaleAggregates,
+} from '../src/helpers/punkHelper'
 
 import {
-  getOrCreateWrap,
-  getOrCreateUnWrap,
-} from "../src/helpers/wrapAndUnwrap";
+	getOrCreateCryptoPunkContract,
+	getOrCreateWrappedPunkContract,
+	updateContractAggregates,
+	getOrCreateV1PunkContract,
+  	getOrCreateFoobarContract
+} from '../src/helpers/contractHelper'
+
+import { createWrap, createUnwrap } from '../src/helpers/wrapAndUnwrap'
+import { getOrCreateSale, handleSaleNotification } from './helpers/saleHelper'
 
 import {
-  getOrCreateAsk,
-  getOrCreateAskCreated,
-  getOrCreateAskRemoved,
-} from "./helpers/askHelpers";
+	closeOldAsk,
+	createAskCreated,
+	createAskRemoved,
+	getOrCreateAsk,
+} from './helpers/askHelpers'
 
 import {
-  getOrCreateBid,
-  getOrCreateBidCreated,
-  getOrCreateBidRemoved,
-} from "../src/helpers/bidHelpers";
+	getOrCreateBid,
+	createBidCreated,
+	createBidRemoved,
+	closeOldBid,
+} from '../src/helpers/bidHelpers'
+
+import { updateSale } from './helpers/saleHelper'
+import { updateAccountAggregates } from './helpers/accountHelper'
+import { createPunk } from './helpers/punkHelper'
 
 import {PunksOG} from "../generated/PunksOG/PunksOG";
 
 export function handleAssign(event: Assigned): void {
-  log.info("handleAssign {}", [event.params.punkIndex.toString()]);
+	log.info('handleAssign {}', [event.params.punkIndex.toString()])
+	// This event fires when the user claims a Punk
 
-  let trait = getTrait(event.params.punkIndex.toI32());
+	let trait = getTrait(event.params.punkIndex.toI32())
+	let tokenId = event.params.punkIndex
+	let account = getOrCreateAccount(event.params.to)
+	let metadata = createMetadata(tokenId)
+	let contract = getOrCreateCryptoPunkContract(event.address)
 
-  let account = getOrCreateAccount(event.params.to);
-  let metadata = getOrCreateMetadata(event.params.punkIndex, event);
-  let contract = getOrCreateCryptoPunkContract(event.address);
-  let ogpunks = PunksOG.bind(Address.fromString('0x6Ba6f2207e343923BA692e5Cae646Fb0F566DB8D'));
-  let isPaired = false;
+	// V1 Pairs
+	let ogpunks = PunksOG.bind(Address.fromString('0x6Ba6f2207e343923BA692e5Cae646Fb0F566DB8D'));
+  	let isPaired = false;
     let ownerAddressV1 = ogpunks.try_punkIndexToAddress(event.params.punkIndex);
         if (!ownerAddressV1.reverted) {
           if (ownerAddressV1.value == event.params.to) {
@@ -95,511 +111,648 @@ export function handleAssign(event: Assigned): void {
           }
         }
 
-  // Assign is always the first event that actually creates the punk
-  let punk = new Punk(event.params.punkIndex.toString());
-  punk.wrapped = false;
+	//Assign is always the first EVENTS that actually creates the punk
+	let punk = createPunk(tokenId, event.params.to, isPaired)
+	let assign = getOrCreateAssign(
+		event.params.punkIndex,
+		event.params.to,
+		punk as Punk,
+		metadata as MetaData,
+		event
+	)
+	if (trait !== null) {
+		let traits = new Array<string>()
+		let type = Trait.load(trait.type)
+		if (!type) {
+			type = new Trait(trait.type)
+			type.type = 'TYPE'
+			type.numberOfNfts = BIGINT_ZERO
+		}
 
-  punk.pairedV1 = isPaired;
-  punk.tokenId = event.params.punkIndex;
-  punk.owner = event.params.to.toHexString();
+		type.numberOfNfts = type.numberOfNfts.plus(BIGINT_ONE)
+		type.save()
+		traits.push(type.id)
 
-  let assign = getOrCreateAssign(
-    event.params.punkIndex,
-    punk as Punk,
-    event.params.to,
-    metadata as MetaData,
-    event
-  );
+		for (let i = 0; i < trait.accessories.length; i++) {
+			let accessoryName = trait.accessories[i]
+			let acessoryId = accessoryName.split(' ').join('-')
+			let accessory = Trait.load(acessoryId)
 
-  if (trait !== null) {
-    let traits = new Array<string>();
-    let type = Trait.load(trait.type);
-    if (!type) {
-      type = new Trait(trait.type);
-      type.type = "TYPE";
-      type.numberOfNfts = BigInt.fromI32(0);
-    }
+			if (accessory === null) {
+				accessory = new Trait(acessoryId)
+				accessory.type = 'ACCESSORY'
+				accessory.numberOfNfts = BIGINT_ZERO
+			}
+			accessory.numberOfNfts = accessory.numberOfNfts.plus(BIGINT_ONE)
+			accessory.save()
+			traits.push(accessory.id)
+		}
 
-    type.numberOfNfts = type.numberOfNfts.plus(BigInt.fromI32(1));
-    type.save();
-    traits.push(type.id);
+		metadata.traits = traits
+	}
 
-    for (let i = 0; i < trait.accessories.length; i++) {
-      let accessoryName = trait.accessories[i];
-      let acessoryId = accessoryName.split(" ").join("-");
-      let accessory = Trait.load(acessoryId);
+	//Update account punk holdings
+	account.numberOfPunksOwned = account.numberOfPunksOwned.plus(BIGINT_ONE)
+	account.numberOfPunksAssigned = account.numberOfPunksAssigned.plus(BIGINT_ONE)
 
-      if (accessory == null) {
-        accessory = new Trait(acessoryId);
-        accessory.type = "ACCESSORY";
-        accessory.numberOfNfts = BigInt.fromI32(0);
-      }
-      accessory.numberOfNfts = accessory.numberOfNfts.plus(BigInt.fromI32(1));
-      accessory.save();
-      traits.push(accessory.id);
-    }
-
-    metadata.traits = traits;
-  }
-
-  account.numberOfPunksOwned = account.numberOfPunksOwned.plus(
-    BigInt.fromI32(1)
-  );
-
-  contract.totalSupply = contract.totalSupply.plus(BigInt.fromI32(1));
-
-  account.save();
-  assign.save();
-  contract.save();
-  metadata.save();
-  punk.save();
+	//Write
+	account.save()
+	assign.save()
+	contract.save()
+	metadata.save()
+	punk.save()
 }
 
+export function handleTransfer(event: cTokenTransfer): void {
+	/**
+	   @summary Throw-away entity
+      		e.g: https://etherscan.io/tx/0x23d6e24628dabf4fa92fa93630e5fa6f679fac75071aab38d7e307a3c0f4a3ca#eventlog
+ 	 */
+	if (event.params.to.toHexString() != ZERO_ADDRESS) {
+		let fromAccount = getOrCreateAccount(event.params.from)
+		let toAccount = getOrCreateAccount(event.params.to)
+		let cToken = getOrCreateCToken(event)
+
+		cToken.from = event.params.from.toHexString()
+		cToken.to = event.params.to.toHexString()
+		cToken.owner = event.params.to.toHexString()
+		cToken.amount = event.params.value
+
+		//Write
+		cToken.save()
+		toAccount.save()
+		fromAccount.save()
+	}
+}
 export function handlePunkTransfer(event: PunkTransfer): void {
-  log.debug("handlePunkTransfer from: {} to: {}", [
-    event.params.from.toHexString(),
-    event.params.to.toHexString(),
-  ]);
-  let fromProxy = UserProxy.load(event.params.from.toHexString());
-  let toProxy = UserProxy.load(event.params.to.toHexString());
+	log.debug('handlePunkTransfer from: {} to: {}', [
+		event.params.from.toHexString(),
+		event.params.to.toHexString(),
+	])
+	let sender = event.params.from
+	let receiver = event.params.to
+	let tokenId = event.params.punkIndex.toString()
 
-  if (toProxy !== null) {
-    log.debug("PunkTransfer to proxy detected toProxy: {} ", [toProxy.id]);
-    return;
-  } else if (
-    event.params.to.toHexString() != WRAPPED_PUNK_ADDRESS &&
-    event.params.from.toHexString() != WRAPPED_PUNK_ADDRESS
-  ) {
-    log.debug("Regular punk transfer check: {} ", [
-      event.params.punkIndex.toString(),
-    ]);
+	let fromProxy = UserProxy.load(sender.toHexString())
+	let toProxy = UserProxy.load(receiver.toHexString())
 
-    let toAccount = getOrCreateAccount(event.params.to);
-    let fromAccount = getOrCreateAccount(event.params.from);
-    let punk = Punk.load(event.params.punkIndex.toString())!;
+	if (toProxy !== null) {
+		log.debug('PunkTransfer to proxy detected toProxy: {} ', [toProxy.id])
+		return
+	} else if (
+		receiver.toHexString() != WRAPPED_PUNK_ADDRESS &&
+		sender.toHexString() != WRAPPED_PUNK_ADDRESS
+	) {
+		log.debug('Regular punk transfer check: {} ', [tokenId])
 
-    let transfer = getOrCreateTransfer(
-      event.params.from,
-      event.params.to,
-      event.params.punkIndex,
-      event,
-      "TRANSFER"
-    );
+		let toAccount = getOrCreateAccount(event.params.to)
+		let fromAccount = getOrCreateAccount(event.params.from)
+		let punk = Punk.load(tokenId)!
 
-    toAccount.numberOfPunksOwned = toAccount.numberOfPunksOwned.plus(
-      BigInt.fromI32(1)
-    );
+		punk.numberOfTransfers = punk.numberOfTransfers.plus(BIGINT_ONE)
 
-    fromAccount.numberOfPunksOwned = fromAccount.numberOfPunksOwned.minus(
-      BigInt.fromI32(1)
-    );
+		let transfer = getOrCreateTransfer(event.params.punkIndex, event)
+		transfer.from = fromAccount.id
+		transfer.to = toAccount.id
+		transfer.nft = punk.id
 
-    // Capture punk transfers and owners if not transfered to WRAPPED PUNK ADDRESS
-    punk.owner = toAccount.id;
+		//We close the oldBid if the bidder was transfered the punk
+		let toBid = punk.currentBid
+		if (toBid !== null) {
+			let oldBid = Bid.load(toBid.toString())!
+			if (oldBid.from == toAccount.id) {
+				oldBid.created = punk.currentBidCreated
+				oldBid.open = false
+				oldBid.save()
+			}
+		}
+		updateAccountHoldings(toAccount, fromAccount)
+		toAccount.numberOfTransfers = toAccount.numberOfTransfers.plus(BIGINT_ONE)
+		fromAccount.numberOfTransfers = fromAccount.numberOfTransfers.plus(
+			BIGINT_ONE
+		)
 
-    transfer.save();
-    toAccount.save();
-    fromAccount.save();
-    punk.save();
-  } else if (
-    fromProxy !== null &&
-    event.params.from.toHexString() == fromProxy.id &&
-    event.params.to.toHexString() == WRAPPED_PUNK_ADDRESS
-  ) {
-    log.info("Wrap detected of punk: {} ", [event.params.punkIndex.toString()]);
-    let wrap = getOrCreateWrap(
-      Address.fromString(WRAPPED_PUNK_ADDRESS),
-      Address.fromString(fromProxy.user),
-      event.params.punkIndex,
-      event
-    );
+		//Capture punk transfers and owners if not transfered to WRAPPED PUNK ADDRESS
+		punk.owner = toAccount.id
 
-    let punk = Punk.load(event.params.punkIndex.toString())!;
-    punk.wrapped = true;
+		//Write
+		transfer.save()
+		toAccount.save()
+		fromAccount.save()
+		punk.save()
+	} else if (
+		fromProxy !== null &&
+		sender.toHexString() == fromProxy.id &&
+		receiver.toHexString() == WRAPPED_PUNK_ADDRESS
+	) {
+		log.info('Wrap detected of punk: {} ', [tokenId])
 
-    punk.save();
-    wrap.save();
-  } else if (event.params.from.toHexString() == WRAPPED_PUNK_ADDRESS) {
-    // Burn/Unwrap
-    log.debug("Unwrapt detected. From: {}, punk: {}", [
-      event.params.from.toHexString(),
-      event.params.punkIndex.toString(),
-    ]);
+		let punk = Punk.load(tokenId)!
+		punk.wrapped = true
 
-    let punk = Punk.load(event.params.punkIndex.toString())!;
+		//Write
+		punk.save()
+	} else if (sender.toHexString() == WRAPPED_PUNK_ADDRESS) {
+		//Burn/Unwrap
+		log.debug('Unwrapped detected. From: {}, punk: {}', [
+			sender.toHexString(),
+			tokenId,
+		])
 
-    let unWrap = getOrCreateUnWrap(
-      Address.fromString(WRAPPED_PUNK_ADDRESS),
-      event.params.from,
-      event.params.to,
-      event.params.punkIndex,
-      event
-    );
+		let punk = Punk.load(event.params.punkIndex.toString())!
+		punk.wrapped = false
 
-    punk.wrapped = false;
-    punk.save();
-    unWrap.save();
-  }
+		//Write
+		punk.save()
+	}
 
-  let punk = Punk.load(event.params.punkIndex.toString())!;
-  let pairedV1 = false
-  let v1contract = V1PunksContract.bind(Address.fromString("0x282bdd42f4eb70e7a9d9f40c8fea0825b7f68c5d"));
-  let owner = v1contract.try_ownerOf(event.params.punkIndex);
-        if (!owner.reverted) {
-            if(owner.value.toHexString() == punk.owner) {
-              pairedV1 = true
-            }
-        }
+	// Paired v1
+	  let punk = Punk.load(event.params.punkIndex.toString())!;
+	  let pairedV1 = false
+	  let v1contract = V1PunksContract.bind(Address.fromString("0x282bdd42f4eb70e7a9d9f40c8fea0825b7f68c5d"));
+	  let owner = v1contract.try_ownerOf(event.params.punkIndex);
+			if (!owner.reverted) {
+				if(owner.value.toHexString() == punk.owner) {
+				  pairedV1 = true
+				}
+			}
 
-  let foobarcontract = FoobarContract.bind(Address.fromString("0xf4a4644e818c2843ba0aabea93af6c80b5984114"));
-  let ownerfoobar = foobarcontract.try_ownerOf(event.params.punkIndex);
-        if (!ownerfoobar.reverted) {
-            if(ownerfoobar.value.toHexString() == punk.owner){
-              pairedV1 = true
-            }
-        }
+	  let foobarcontract = FoobarContract.bind(Address.fromString("0xf4a4644e818c2843ba0aabea93af6c80b5984114"));
+	  let ownerfoobar = foobarcontract.try_ownerOf(event.params.punkIndex);
+			if (!ownerfoobar.reverted) {
+				if(ownerfoobar.value.toHexString() == punk.owner){
+				  pairedV1 = true
+				}
+			}
 
-  let ogpunks = PunksOG.bind(Address.fromString('0x6Ba6f2207e343923BA692e5Cae646Fb0F566DB8D'));
-    let ownerAddressV1 = ogpunks.try_punkIndexToAddress(event.params.punkIndex);
-        if (!ownerAddressV1.reverted) {
-          if(ownerAddressV1.value.toHexString() == punk.owner){
-              pairedV1 = true
-            }
+	  let ogpunks = PunksOG.bind(Address.fromString('0x6Ba6f2207e343923BA692e5Cae646Fb0F566DB8D'));
+		let ownerAddressV1 = ogpunks.try_punkIndexToAddress(event.params.punkIndex);
+			if (!ownerAddressV1.reverted) {
+			  if(ownerAddressV1.value.toHexString() == punk.owner){
+				  pairedV1 = true
+				}
 
-        }
+			}
 
 
-    punk.pairedV1 = pairedV1;
-    punk.save();
+		punk.pairedV1 = pairedV1;
+		punk.save();
 }
 
 export function handlePunkOffered(event: PunkOffered): void {
-  log.debug("handlePunkOffered: PunkIndex {}, toAddress: {}, hash: {}", [
-    event.params.punkIndex.toString(),
-    event.params.toAddress.toHexString(),
-    event.transaction.hash.toHexString(),
-  ]);
+	/**
+    	@description:
+			- createAskCreatedEVENT
+			- create Ask
+			- create relationship between Ask and AskCreated to provide information on creation EVENT
+	*/
 
-  let askCreated = getOrCreateAskCreated(event.params.punkIndex, event);
-  let askRemoved = getOrCreateAskRemoved(event.params.punkIndex, event);
+	let punk = Punk.load(event.params.punkIndex.toString())!
+	let askCreated = createAskCreated(event.params.punkIndex, event)
+	let fromAccount = getOrCreateAccount(Address.fromString(punk.owner))
+	closeOldAsk(punk, fromAccount)
 
-  let punk = Punk.load(event.params.punkIndex.toString())!;
-  let ask = getOrCreateAsk(
-    askRemoved as AskRemoved,
-    askCreated as AskCreated,
-    event.params.punkIndex,
-    event
-  );
+	let ask = getOrCreateAsk(punk.owner, event)
 
-  //event.params.to currently emits to 0x0(ZERO_ADDRESS) and doesn't emit msg.sender
-  //The previous owner remains the owner
-  ask.from = punk.owner;
-  askCreated.from = punk.owner;
-  ask.amount = event.params.minValue;
-  askCreated.amount = event.params.minValue;
+	ask.nft = punk.id
+	ask.from = punk.owner
+	ask.amount = event.params.minValue
+	ask.created = askCreated.id
+	ask.open = true
 
-  //Ask created to another account. offerPunkForSaleToAddress()
-  if (event.params.toAddress.toHexString() != ZERO_ADDRESS) {
-    let askCreated = getOrCreateAskCreated(event.params.punkIndex, event);
-    let askRemoved = getOrCreateAskRemoved(event.params.punkIndex, event);
-    let account = getOrCreateAccount(event.params.toAddress);
-    let punk = Punk.load(event.params.punkIndex.toString())!;
-    let ask = getOrCreateAsk(
-      askRemoved as AskRemoved,
-      askCreated as AskCreated,
-      event.params.punkIndex,
-      event
-    );
+	askCreated.ask = ask.id
+	askCreated.to = event.params.toAddress.toHexString()
+	askCreated.from = punk.owner
+	askCreated.amount = event.params.minValue
 
-    //The previous owner remains the owner
-    ask.from = punk.owner;
-    askCreated.from = punk.owner;
-    askCreated.to = account.id;
-    askCreated.amount = event.params.minValue;
-    ask.amount = event.params.minValue;
+	punk.currentAskCreated = askCreated.id
 
-    ask.save();
-    punk.save();
-    account.save();
-    askRemoved.save();
-    askCreated.save();
-  }
+	//Update the currentAsk for the punk in Punk entity for future reference
+	punk.currentAsk = ask.id
 
-  ask.save();
-  punk.save();
-  askRemoved.save();
-  askCreated.save();
+	//Write
+	askCreated.save()
+	punk.save()
+	ask.save()
+
+	//Remove before deploying to The Graph Network
+	if (event.block.number.gt(BigInt.fromI32(15205322))) {
+		handleAskNotification(
+			punk.id,
+			punk.owner,
+			convertPriceToBigDecimal(event.params.minValue).toString(),
+			event
+		)
+	}
 }
 
 export function handlePunkBidEntered(event: PunkBidEntered): void {
-  log.debug("handlePunkBidCreatedEntered", []);
+	/**
+    	@summary This event first only fires when a bid is created
+   	 	@description:
+       		- createBidCreatedEVENT
+       		- create Bid
+       		- create relationship between Bid and BidCreated to provide information on creation EVENT
+  	*/
+	log.debug('handlePunkBidCreatedEntered', [])
 
-  let bidCreated = getOrCreateBidCreated(
-    event.params.fromAddress,
-    event.params.punkIndex,
-    event
-  );
+	let bidCreated = createBidCreated(
+		event.params.punkIndex,
+		event.params.fromAddress.toHexString(),
+		event
+	)
+	let punk = Punk.load(event.params.punkIndex.toString())!
+	let account = getOrCreateAccount(event.params.fromAddress)
+	let bid = getOrCreateBid(event.params.fromAddress.toHexString(), event)
 
-  let bidRemoved = getOrCreateBidRemoved(
-    event.params.fromAddress,
-    bidCreated as BidCreated,
-    event.params.punkIndex,
-    event
-  );
+	bid.amount = event.params.value
+	bid.nft = punk.id
+	bid.from = account.id
+	bid.created = bidCreated.id
 
-  let punk = Punk.load(event.params.punkIndex.toString())!;
-  let account = getOrCreateAccount(event.params.fromAddress);
+	punk.currentBid = bid.id
 
-  let bid = getOrCreateBid(
-    event.params.fromAddress,
-    bidRemoved as BidRemoved,
-    bidCreated as BidCreated,
-    event.params.punkIndex,
-    event
-  );
+	bidCreated.bid = bid.id //Create relationship with Bid
+	bidCreated.amount = event.params.value
 
-  bid.amount = event.params.value;
-  bidRemoved.amount = event.params.value;
-  bidCreated.amount = event.params.value;
+	//Update the currentBid for the punk in Punk entity for future reference
+	punk.currentBidCreated = bidCreated.id
 
-  bid.save();
-  punk.save();
-  account.save();
-  bidRemoved.save();
-  bidCreated.save();
+	//Write
+	bid.save()
+	punk.save()
+	account.save()
+	bidCreated.save()
+
+	//Remove before deploying to The Graph Network
+	if (event.block.number.gt(BigInt.fromI32(15205322))) {
+		handleBidNotification(
+			punk.id,
+			account.id,
+			convertPriceToBigDecimal(event.params.value).toString(),
+			event
+		)
+	}
 }
-
 export function handlePunkBidWithdrawn(event: PunkBidWithdrawn): void {
-  log.debug("handlePunkBidCreatedWithdrawn", []);
+	/**
+    	@summary: The event fires anytime a bidder withdraws their bid
+		@description:
+			- createBidRemovedEVENT
+			- close Old Bid
+			- create relationship between Bid and BidRemoved
+ 	 */
+	log.debug('handlePunkBidCreatedWithdrawn', [])
 
-  let bidCreated = getOrCreateBidCreated(
-    event.params.fromAddress,
-    event.params.punkIndex,
-    event
-  );
+	let fromAccount = getOrCreateAccount(event.params.fromAddress)
+	let punk = Punk.load(event.params.punkIndex.toString())!
+	let bidRemoved = createBidRemoved(
+		event.params.punkIndex,
+		event.params.fromAddress.toHexString(),
+		event
+	)
+	bidRemoved.amount = event.params.value
+	bidRemoved.nft = punk.id
 
-  let bidRemoved = getOrCreateBidRemoved(
-    event.params.fromAddress,
-    bidCreated as BidCreated,
-    event.params.punkIndex,
-    event
-  );
-  let account = getOrCreateAccount(event.params.fromAddress);
-  let punk = Punk.load(event.params.punkIndex.toString())!;
+	let oldBidId = punk.currentBid
+	if (oldBidId !== null) {
+		let oldBid = Bid.load(oldBidId.toString())!
+		oldBid.created = punk.currentBidCreated
+		oldBid.from = fromAccount.id
+		oldBid.open = false
+		oldBid.removed = bidRemoved.id
 
-  bidRemoved.amount = event.params.value;
+		bidRemoved.bid = oldBid.id
 
-  punk.save();
-  account.save();
-  bidRemoved.save();
-  bidCreated.save();
-}
+		oldBid.save()
+	}
+	//Update Punk fields with current bid removal EVENT so we can reference them elsewhere
+	punk.currentBidRemoved = bidRemoved.id
 
-export function handlePunkBought(event: PunkBought): void {
-  log.debug("handlePunkBought", []);
+	// V1 punk pair
+	  let v1contract = V1PunksContract.bind(Address.fromString("0x282bdd42f4eb70e7a9d9f40c8fea0825b7f68c5d"));
 
-  let sale = getOrCreateSale(
-    event.params.toAddress,
-    event.params.fromAddress,
-    event.params.punkIndex,
-    event
-  );
-  let punk = Punk.load(event.params.punkIndex.toString())!;
-  let contract = getOrCreateCryptoPunkContract(event.address);
-  let toAccount = getOrCreateAccount(event.params.toAddress);
-  let fromAccount = getOrCreateAccount(event.params.fromAddress);
+	  let pairedV1 = false;
+	  let owner = v1contract.try_ownerOf(event.params.punkIndex);
+			if (!owner.reverted) {
 
-  sale.amount = event.params.value;
+				if(owner.value.toHexString() == punk.owner){
+				  pairedV1 = true;
+				}
+			}
 
-  contract.totalAmountTraded = contract.totalAmountTraded.plus(
-    event.params.value
-  );
-  contract.totalSales = contract.totalSales.plus(BigInt.fromI32(1));
+	  let foobarcontract = FoobarContract.bind(Address.fromString("0xf4a4644e818c2843ba0aabea93af6c80b5984114"));
+	  let ownerfoobar = foobarcontract.try_ownerOf(event.params.punkIndex);
+			if (!ownerfoobar.reverted) {
+				if(ownerfoobar.value.toHexString() == punk.owner){
+				 pairedV1 = true;
+				}
+			}
 
-  // Note: buyPunk() does not emit a PunkTransfer event, so we need to keep track
-  toAccount.numberOfPunksOwned = toAccount.numberOfPunksOwned.plus(
-    BigInt.fromI32(1)
-  );
+	  let ogpunks = PunksOG.bind(Address.fromString('0x6Ba6f2207e343923BA692e5Cae646Fb0F566DB8D'));
+		let ownerAddressV1 = ogpunks.try_punkIndexToAddress(event.params.punkIndex);
+			if (!ownerAddressV1.reverted) {
+			  if(ownerAddressV1.value.toHexString() == punk.owner){
+				  pairedV1 = true;
+				}
+			}
+	  punk.pairedV1 = pairedV1;
 
-  fromAccount.numberOfPunksOwned = fromAccount.numberOfPunksOwned.minus(
-    BigInt.fromI32(1)
-  );
 
-  punk.purchasedBy = toAccount.id;
-  punk.owner = toAccount.id;
-
-  let v1contract = V1PunksContract.bind(Address.fromString("0x282bdd42f4eb70e7a9d9f40c8fea0825b7f68c5d"));
-
-  let pairedV1 = false;
-  let owner = v1contract.try_ownerOf(event.params.punkIndex);
-        if (!owner.reverted) {
-
-            if(owner.value.toHexString() == punk.owner){
-              pairedV1 = true;
-            }
-        }
-
-  let foobarcontract = FoobarContract.bind(Address.fromString("0xf4a4644e818c2843ba0aabea93af6c80b5984114"));
-  let ownerfoobar = foobarcontract.try_ownerOf(event.params.punkIndex);
-        if (!ownerfoobar.reverted) {
-            if(ownerfoobar.value.toHexString() == punk.owner){
-             pairedV1 = true;
-            }
-        }
-
-  let ogpunks = PunksOG.bind(Address.fromString('0x6Ba6f2207e343923BA692e5Cae646Fb0F566DB8D'));
-    let ownerAddressV1 = ogpunks.try_punkIndexToAddress(event.params.punkIndex);
-        if (!ownerAddressV1.reverted) {
-          if(ownerAddressV1.value.toHexString() == punk.owner){
-              pairedV1 = true;
-            }
-        }
-  punk.pairedV1 = pairedV1;
-
-  punk.save();
-  fromAccount.save();
-  toAccount.save();
-  contract.save();
-  sale.save();
+	//Write
+	punk.save()
+	fromAccount.save()
+	bidRemoved.save()
 }
 
 export function handlePunkNoLongerForSale(event: PunkNoLongerForSale): void {
-  log.debug("handlePunkNoLongerForSale", []);
+	log.debug('handlePunkNoLongerForSale', [])
+	/**
+	 * @description
+   		- This event fires when the owner removes their ask
+   		- Also fires when the owner's Ask is accepted which closes their ask and creates a SaleEVENT
+        - SaleEvent is a regular PunkBoughtEVENT which we already captured in handlePunkBought()
 
-  let askRemoved = getOrCreateAskRemoved(event.params.punkIndex, event);
-  let askCreated = getOrCreateAskCreated(event.params.punkIndex, event);
-  let punk = Punk.load(event.params.punkIndex.toString())!;
+		- createAskRemovedEVENT
+		- close Old Ask
+	*/
+	let punk = Punk.load(event.params.punkIndex.toString())!
+	let askRemoved = createAskRemoved(event.params.punkIndex, event)
 
-  if (!punk) {
-    punk = new Punk(event.params.punkIndex.toString());
-  }
+	//Close Old Ask
+	let oldAskId = punk.currentAsk
+	if (oldAskId !== null) {
+		let oldAsk = Ask.load(oldAskId.toString())!
+		//Create relationship with AskRemoved
+		oldAsk.removed = askRemoved.id
+		oldAsk.created = punk.currentAskCreated
+		oldAsk.nft = punk.id
+		oldAsk.open = false
+		oldAsk.from = punk.owner
+		askRemoved.ask = oldAsk.id
 
-  askRemoved.ask = askCreated.id;
+		oldAsk.save()
+	} else {
+		//https://cryptopunks.app/cryptopunks/details/2158
+		//This is a weird case where an offer can be withdrawn before it's created
 
-  punk.tokenId = event.params.punkIndex;
+		let ask = getOrCreateAsk(punk.owner, event)
+		ask.nft = punk.id
+		ask.open = false
+		ask.from = punk.owner
+		ask.removed = askRemoved.id
 
-  punk.save();
-  askCreated.save();
-  askRemoved.save();
+		//Amount is 0 because this field is non-nullable & this basically initializes the field so it doesn't fail.
+		//Also, this event doesn't emit the amount.
+
+		ask.amount = BIGINT_ZERO
+		askRemoved.amount = BIGINT_ZERO
+		askRemoved.ask = ask.id
+
+		ask.save()
+	}
+
+	punk.currentAskRemoved = askRemoved.id
+
+	//Write
+	askRemoved.save()
+	punk.save()
 }
 
-// This function is called for three events: Mint (Wrap), Burn (Unwrap) and Transfer
+export function handlePunkBought(event: PunkBought): void {
+	if (event.params.toAddress.toHexString() == ZERO_ADDRESS) {
+		/**
+		 * @summary
+     		- Logic for tracking acceptBidForPunk(), BidAccepted
+        		e.g https://etherscan.io/tx/0x23d6e24628dabf4fa92fa93630e5fa6f679fac75071aab38d7e307a3c0f4a3ca#eventlog
+
+		   @description:
+			- createBidRemovedEvent
+			- close Old Bid only if bidder is the buyer
+			- close Old Ask since it has been sold
+			- createSaleEvent
+			- update aggregates for Account, Contract and Punk
+    	*/
+
+		let tokenId = event.params.punkIndex
+		let punk = Punk.load(tokenId.toString())!
+		let contract = getOrCreateCryptoPunkContract(event.address)
+		let fromAccount = getOrCreateAccount(event.params.fromAddress)
+		let toAccount = getOrCreateAccount(
+			Address.fromString(getOwnerFromCToken(event))
+		)
+		let bidRemoved = createBidRemoved(
+			tokenId,
+			event.params.fromAddress.toHexString(),
+			event
+		)
+		let sale = getOrCreateSale(
+			event.params.fromAddress,
+			tokenId.toString(),
+			event
+		)
+		closeOldAsk(punk, fromAccount)
+
+		//Close old bid if the bidder is the buyer & use the bid amount to update sale
+		let oldPunkBidId = punk.currentBid
+		if (oldPunkBidId !== null) {
+			let oldBid = Bid.load(oldPunkBidId.toString())!
+			if (oldBid.from == toAccount.id) {
+				oldBid.created = punk.currentBidCreated
+				oldBid.removed = bidRemoved.id
+				oldBid.nft = punk.id
+				bidRemoved.bid = oldBid.id
+				oldBid.open = false
+
+				oldBid.save()
+			}
+			updateSale(
+				sale,
+				oldBid.amount,
+				Address.fromString(getOwnerFromCToken(event))
+			)
+			updateAccountAggregates(fromAccount, toAccount, oldBid.amount)
+			updatePunkSaleAggregates(punk, oldBid.amount)
+			updateContractAggregates(contract, oldBid.amount)
+
+			if (event.block.number.gt(BigInt.fromI32(15205322))) {
+				handleSaleNotification(
+					punk.id,
+					toAccount.id,
+					convertPriceToBigDecimal(oldBid.amount).toString(),
+					event
+				)
+			}
+		}
+
+		updatePunkOwner(punk, Address.fromString(getOwnerFromCToken(event)))
+		updateAccountHoldings(toAccount, fromAccount)
+
+		//Save the current BidRemoved for future reference
+		punk.currentBidRemoved = bidRemoved.id
+
+		//Write
+		contract.save()
+		punk.save()
+		sale.save()
+		bidRemoved.save()
+		toAccount.save()
+		fromAccount.save()
+	} else {
+		log.debug('handlePunkBought', [])
+
+		/**
+      		@summary Logic for tracking Regular PunkBought
+			@description: This also implicitly captures AskAccepted for Punk which is updated in PunkNoLongerForSaleEVENT(Close Ask)
+	  			Example: https://etherscan.io/tx/0x0004ba250b29b0e2cda2e882c8bf5a14e7d2133e63bf0334fb1f44c716ccb187#eventlog
+      		- buyPunk() does not emit a PunkTransfer event, so we need to keep track
+			- createSaleEvent
+			- close Old Bid if bidder is buyer
+			- close Old Ask
+    	*/
+
+		let price = event.params.value
+		let tokenId = event.params.punkIndex.toString()
+		let seller = event.params.fromAddress
+		let buyer = event.params.toAddress
+
+		let punk = Punk.load(tokenId)!
+		let contract = getOrCreateCryptoPunkContract(event.address)
+		let toAccount = getOrCreateAccount(buyer)
+		let fromAccount = getOrCreateAccount(seller)
+		let sale = getOrCreateSale(seller, punk.id, event)
+
+		updateSale(sale, price, buyer)
+		closeOldBid(punk, toAccount)
+		closeOldAsk(punk, fromAccount)
+		updatePunkOwner(punk, buyer)
+		updatePunkSaleAggregates(punk, price)
+		updateContractAggregates(contract, price)
+		updateAccountHoldings(toAccount, fromAccount)
+		updateAccountAggregates(fromAccount, toAccount, price)
+
+		//Write
+		punk.save()
+		fromAccount.save()
+		toAccount.save()
+		contract.save()
+		sale.save()
+
+		//Remove before deploying to The Graph Network
+		if (event.block.number.gt(BigInt.fromI32(15205322))) {
+			handleSaleNotification(
+				punk.id,
+				buyer.toHexString(),
+				convertPriceToBigDecimal(price).toString(),
+				event
+			)
+		}
+	}
+}
+
+//This function is called for three events: Mint (Wrap), Burn (Unwrap) and Transfer
 export function handleWrappedPunkTransfer(event: WrappedPunkTransfer): void {
-  log.info("handleWrappedPunksTransfer tokenId: {} from: {} to: {}", [
-    event.params.tokenId.toString(),
-    event.params.from.toHexString(),
-    event.params.to.toHexString(),
-  ]);
+	log.info('handleWrappedPunksTransfer tokenId: {} from: {} to: {}', [
+		event.params.tokenId.toString(),
+		event.params.from.toHexString(),
+		event.params.to.toHexString(),
+	])
 
-  let contract = getOrCreateWrappedPunkContract(event.address);
+	let contract = getOrCreateWrappedPunkContract(event.address)
 
-  if (event.params.from.toHexString() == ZERO_ADDRESS) {
-    // A wrapped punk is minted (wrapped)
-    let wrap = getOrCreateWrap(
-      Address.fromString(WRAPPED_PUNK_ADDRESS),
-      event.params.from,
-      event.params.tokenId,
-      event
-    );
+	if (event.params.from.toHexString() == ZERO_ADDRESS) {
+		// A wrapped punk is minted (wrapped)
+		let wrap = createWrap(
+			Address.fromString(WRAPPED_PUNK_ADDRESS),
+			event.params.from,
+			event.params.tokenId,
+			event
+		)
 
-    contract.totalSupply = contract.totalSupply.plus(BigInt.fromI32(1));
+		contract.totalSupply = contract.totalSupply.plus(BIGINT_ONE)
 
-    wrap.to = event.params.to.toHexString();
-    wrap.save();
-  } else if (event.params.to.toHexString() == ZERO_ADDRESS) {
-    // A wrapped punk is burned (unwrapped)
-    let unWrap = getOrCreateUnWrap(
-      Address.fromString(WRAPPED_PUNK_ADDRESS),
-      event.params.from,
-      event.params.to,
-      event.params.tokenId,
-      event
-    );
+		wrap.to = event.params.to.toHexString()
 
-    contract.totalSupply = contract.totalSupply.minus(BigInt.fromI32(1));
+		//Write
+		wrap.save()
+	} else if (event.params.to.toHexString() == ZERO_ADDRESS) {
+		// A wrapped punk is burned (unwrapped)
+		let unWrap = createUnwrap(
+			event.params.from,
+			event.params.to,
+			event.params.tokenId,
+			event
+		)
 
-    unWrap.save();
-  } else {
-    // Wrapped Punk Transfer
+		contract.totalSupply = contract.totalSupply.minus(BIGINT_ONE)
 
-    // We do not want to save a transfer for wrapped punk mints/burns
-    let transfer = getOrCreateTransfer(
-      event.params.from,
-      event.params.to,
-      event.params.tokenId,
-      event,
-      "WRAPPEDPUNKTRANSFER"
-    );
+		//Write
+		unWrap.save()
+	} else {
+		//Wrapped Punk Transfer
+		//We do not want to save a transfer for wrapped punk mints/burns
+		let transfer = getOrCreateTransfer(event.params.tokenId, event)
+		let toAccount = getOrCreateAccount(event.params.to)
+		let fromAccount = getOrCreateAccount(event.params.from)
+		let punk = Punk.load(event.params.tokenId.toString())!
 
-    let toAccount = getOrCreateAccount(event.params.to);
-    let fromAccount = getOrCreateAccount(event.params.from);
-    let punk = Punk.load(event.params.tokenId.toString())!;
+		//We create a cToken Entity here to store IDs for future comparison
+		let cToken = getOrCreateCToken(event)
+		cToken.from = event.params.from.toHexString()
+		cToken.to = event.params.to.toHexString()
+		cToken.owner = event.params.to.toHexString()
+		cToken.punkId = event.params.tokenId.toString()
 
-    toAccount.numberOfPunksOwned = toAccount.numberOfPunksOwned.plus(
-      BigInt.fromI32(1)
-    );
-    fromAccount.numberOfPunksOwned = fromAccount.numberOfPunksOwned.minus(
-      BigInt.fromI32(1)
-    );
-    punk.owner = toAccount.id;
+		//We need the contract address to filter our transactions from other marketplace(OpenSea,RaribleExchangeV1, ERC721Sale) sales
+		cToken.referenceId = event.address.toHexString()
 
-    fromAccount.save();
-    toAccount.save();
-    transfer.save();
-    punk.save();
-  }
+		transfer.from = fromAccount.id
+		transfer.to = toAccount.id
+		transfer.nft = punk.id
 
-  let punk = Punk.load(event.params.tokenId.toString())!;
-  let v1contract = V1PunksContract.bind(Address.fromString("0x282bdd42f4eb70e7a9d9f40c8fea0825b7f68c5d"));
+		updateAccountHoldings(toAccount, fromAccount)
+		punk.owner = toAccount.id
+		punk.numberOfTransfers = punk.numberOfTransfers.plus(BIGINT_ONE)
 
-  let pairedV1 = false;
-  let owner = v1contract.try_ownerOf(event.params.tokenId);
-        if (!owner.reverted) {
+		//Write
+		fromAccount.save()
+		toAccount.save()
+		transfer.save()
+		cToken.save()
+		punk.save()
+	}
 
-            if(owner.value.toHexString() == punk.owner){
-              pairedV1 = true;
-            }
-        }
+	// V1 wrapped punk
+	  let punk = Punk.load(event.params.tokenId.toString())!;
+	  let v1contract = V1PunksContract.bind(Address.fromString("0x282bdd42f4eb70e7a9d9f40c8fea0825b7f68c5d"));
 
-  let foobarcontract = FoobarContract.bind(Address.fromString("0xf4a4644e818c2843ba0aabea93af6c80b5984114"));
-  let ownerfoobar = foobarcontract.try_ownerOf(event.params.tokenId);
-        if (!ownerfoobar.reverted) {
-            if(ownerfoobar.value.toHexString() == punk.owner){
-             pairedV1 = true;
-            }
-        }
+	  let pairedV1 = false;
+	  let owner = v1contract.try_ownerOf(event.params.tokenId);
+			if (!owner.reverted) {
 
-  let ogpunks = PunksOG.bind(Address.fromString('0x6Ba6f2207e343923BA692e5Cae646Fb0F566DB8D'));
-    let ownerAddressV1 = ogpunks.try_punkIndexToAddress(event.params.tokenId);
-        if (!ownerAddressV1.reverted) {
-          if(ownerAddressV1.value.toHexString() == punk.owner){
-              pairedV1 = true;
-            }
-        }
-  punk.pairedV1 = pairedV1;
-  punk.save();
-  contract.save();
-}
+				if(owner.value.toHexString() == punk.owner){
+				  pairedV1 = true;
+				}
+			}
 
-// This function is called for three events: Mint (Wrap), Burn (Unwrap) and Transfer
-export function handleV1PunkTransfer(event: V1PunkTransfer): void {
-  log.info("handleV1PunksTransfer tokenId: {} from: {} to: {}", [
-    event.params.tokenId.toString(),
-    event.params.from.toHexString(),
-    event.params.to.toHexString(),
-  ]);
+	  let foobarcontract = FoobarContract.bind(Address.fromString("0xf4a4644e818c2843ba0aabea93af6c80b5984114"));
+	  let ownerfoobar = foobarcontract.try_ownerOf(event.params.tokenId);
+			if (!ownerfoobar.reverted) {
+				if(ownerfoobar.value.toHexString() == punk.owner){
+				 pairedV1 = true;
+				}
+			}
 
-  let contract = getOrCreateV1PunkContract(event.address);
-
-  let punk = Punk.load(event.params.tokenId.toString())!;
-  if(punk.owner == event.params.to.toHexString()){
-    punk.pairedV1 = true;
-  } else{
-    punk.pairedV1 = false;
-  }
-
-  punk.save();
-  contract.save();
+	  let ogpunks = PunksOG.bind(Address.fromString('0x6Ba6f2207e343923BA692e5Cae646Fb0F566DB8D'));
+		let ownerAddressV1 = ogpunks.try_punkIndexToAddress(event.params.tokenId);
+			if (!ownerAddressV1.reverted) {
+			  if(ownerAddressV1.value.toHexString() == punk.owner){
+				  pairedV1 = true;
+				}
+			}
+	  punk.pairedV1 = pairedV1;
+	  punk.save();
+	contract.save()
 }
 
 // This function is called for three events: Mint (Wrap), Burn (Unwrap) and Transfer
@@ -655,15 +808,15 @@ export function handleOGAssign(event: OGAssign): void {
 
     punk.save();
   }
-
 }
 
+
 export function handleProxyRegistered(event: ProxyRegistered): void {
-  let userProxy = new UserProxy(event.params.proxy.toHexString());
-  userProxy.user = event.params.user.toHexString();
-  userProxy.timestamp = event.block.timestamp;
-  userProxy.txHash = event.transaction.hash;
-  userProxy.blockNumber = event.block.number;
-  userProxy.blockHash = event.block.hash;
-  userProxy.save();
+	let userProxy = new UserProxy(event.params.proxy.toHexString())
+	userProxy.user = event.params.user.toHexString()
+	userProxy.timestamp = event.block.timestamp
+	userProxy.txHash = event.transaction.hash
+	userProxy.blockNumber = event.block.number
+	userProxy.blockHash = event.block.hash
+	userProxy.save()
 }

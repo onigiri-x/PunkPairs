@@ -3,96 +3,49 @@
 The CryptoPunks are 10,000 uniquely generated characters.
 No two are exactly alike, and each one of them can be officially owned by a single person on the Ethereum blockchain.
 
-Test
+![Punks](punks.png)
 
-## Query account
-
-```graphql
-{
-  accounts(where: { id: "0x94de7e2c73529ebf3206aa3459e699fbcdfcd49b" }) {
-    id
-    nftsOwned {
-      id
-    }
-    wrappedPunksOwned {
-      id
-    }
-    bought {
-      id
-      timestamp
-      txHash
-    }
-    assigned {
-      id
-      timestamp
-      txHash
-    }
-    received {
-      id
-      timestamp
-      txHash
-    }
-    bids {
-      id
-      offerType
-      created {
-        id
-        amount
-        type
-        timestamp
-        txHash
-      }
-      removed {
-        id
-        type
-        timestamp
-        txHash
-      }
-    }
-    asks {
-      id
-    }
-  }
-}
+## Subgraph Url
+```
+https://thegraph.com/explorer/subgraph?id=YqMJatbgbqy1GodtbYZv4U9NzyaScCgSF7CAE5ivAM7&view=Overview
 ```
 
-## Query Punk data
+## GraphQL Endpoint
 
-```graphql
-{
-  punks(where: { tokenid: "1000" }) {
-    id
-    accessories
-  }
-}
+You first need to create an `API-KEY`. See: https://youtu.be/UrfIpm-Vlgs
+```
+https://gateway.thegraph.com/api/[API-KEY]/subgraphs/id/YqMJatbgbqy1GodtbYZv4U9NzyaScCgSF7CAE5ivAM7
+```
+## Queries
+A list of example queries you can make can be found here: [Queries.md](Queries.md) 
+
+## Links
+
+- Protocol: https://cryptopunks.app/
+- Contract addresses:
+    - Cryptopunks: `0xb47e3cd837dDF8e4c57F05d70Ab865de6e193BBB`
+    - CryptopunksData: `0x16F5A35647D6F03D5D3da7b35409D65ba03aF3B2`
+    - WrappedPunks: `0xb7F7F6C52F2e2fdb1963Eab30438024864c313F6`
+    - Opensea: `0x7be8076f4ea4a4ad08075c2508e481d6c946d12b`
+    - RaribleExchangeV1: `0xcd4ec7b66fbc029c116ba9ffb3e59351c20b5b06`
+    - ERC721Sale: `0x131aebbfe55bca0c9eaad4ea24d386c5c082dd58`
+
+## EPNS Notifications
+
+Subscribe to get realtime event notifications from the subgraph.
+
+```
+https://staging.epns.io#/channels
 ```
 
-## Available Enums for Punk
-
-- male
-- female
-- zombie
-- alien
-- ape
-
-## Query male Punks
-
-```graphql
-{
-  punks(where: { type: male }) {
-    id
-    accessories
-    type
-  }
-}
-```
-
+Search for `Cryptopunks Marketplace` and opt-in.
 ## Run your local Graph Node
 
 ```bash
-ETHEREUM_RPC=mainnet:https://eth-mainnet.alchemyapi.io/v2/${YOUR_API_KEY} docker compose up
+ETHEREUM_RPC=mainnet:https://eth-mainnet.alchemyapi.io/v2/${YOUR_API_KEY}
 ```
 
+Run the command: `docker compose up`
 ## Logic for Transfers/Wraps
 
 - Regular PunkTransfer
@@ -104,7 +57,7 @@ ETHEREUM_RPC=mainnet:https://eth-mainnet.alchemyapi.io/v2/${YOUR_API_KEY} docker
 - Mint/Wrap
   - In handlePunkTransfer (to = WrappedPunkAddress):
     - decrement from
-  - In handleWrappedPunkTransfer (from = ZeroAddress):
+    - In handleWrappedPunkTransfer (from = ZeroAddress):
     - increment to
     - set owner
     - create Wrap event
@@ -121,3 +74,23 @@ ETHEREUM_RPC=mainnet:https://eth-mainnet.alchemyapi.io/v2/${YOUR_API_KEY} docker
     - increment to
     - set owner
     - create Transfer event
+
+## Build
+
+- Initialize subgraph (Subgraph Studio):
+  ```
+  graph init --product subgraph-studio
+  --from-contract <CONTRACT_ADDRESS> [--network <ETHEREUM_NETWORK>] [--abi <FILE>] <SUBGRAPH_SLUG> [<DIRECTORY>]
+  ```
+- Initialize subgraph (Hosted Service):
+  ```
+  graph init --product hosted-service --from-contract <CONTRACT_ADDRESS> <GITHUB_USER>/<SUBGRAPH_NAME>[<DIRECTORY>]
+  ```
+- Generate code from manifest and schema: `graph codegen`
+- Build subgraph: `graph build`
+
+## Deploy
+
+- Authenticate (just once): `graph auth --product hosted-service <ACCESS_TOKEN>`
+- Deploy to Subgraph Studio: `graph deploy --studio <SUBGRAPH_NAME>`
+- Deploy to Hosted Service: `graph deploy --product hosted-service <GITHUB_USER>/<SUBGRAPH_NAME>`
