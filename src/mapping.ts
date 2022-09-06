@@ -266,37 +266,7 @@ export function handlePunkTransfer(event: PunkTransfer): void {
 		punk.save()
 	}
 
-	// Paired v1
-	  let punk = Punk.load(event.params.punkIndex.toString())!;
-	  let pairedV1 = false
-	  let v1contract = V1PunksContract.bind(Address.fromString("0x282bdd42f4eb70e7a9d9f40c8fea0825b7f68c5d"));
-	  let owner = v1contract.try_ownerOf(event.params.punkIndex);
-			if (!owner.reverted) {
-				if(owner.value.toHexString() == punk.owner) {
-				  pairedV1 = true
-				}
-			}
-
-	  let foobarcontract = FoobarContract.bind(Address.fromString("0xf4a4644e818c2843ba0aabea93af6c80b5984114"));
-	  let ownerfoobar = foobarcontract.try_ownerOf(event.params.punkIndex);
-			if (!ownerfoobar.reverted) {
-				if(ownerfoobar.value.toHexString() == punk.owner){
-				  pairedV1 = true
-				}
-			}
-
-	  let ogpunks = PunksOG.bind(Address.fromString('0x6Ba6f2207e343923BA692e5Cae646Fb0F566DB8D'));
-		let ownerAddressV1 = ogpunks.try_punkIndexToAddress(event.params.punkIndex);
-			if (!ownerAddressV1.reverted) {
-			  if(ownerAddressV1.value.toHexString() == punk.owner){
-				  pairedV1 = true
-				}
-
-			}
-
-
-		punk.pairedV1 = pairedV1;
-		punk.save();
+	updateV1Pair(event.params.punkIndex);
 }
 
 export function handlePunkOffered(event: PunkOffered): void {
@@ -430,33 +400,8 @@ export function handlePunkBidWithdrawn(event: PunkBidWithdrawn): void {
 	punk.currentBidRemoved = bidRemoved.id
 
 	// V1 punk pair
-	  let v1contract = V1PunksContract.bind(Address.fromString("0x282bdd42f4eb70e7a9d9f40c8fea0825b7f68c5d"));
 
-	  let pairedV1 = false;
-	  let owner = v1contract.try_ownerOf(event.params.punkIndex);
-			if (!owner.reverted) {
-
-				if(owner.value.toHexString() == punk.owner){
-				  pairedV1 = true;
-				}
-			}
-
-	  let foobarcontract = FoobarContract.bind(Address.fromString("0xf4a4644e818c2843ba0aabea93af6c80b5984114"));
-	  let ownerfoobar = foobarcontract.try_ownerOf(event.params.punkIndex);
-			if (!ownerfoobar.reverted) {
-				if(ownerfoobar.value.toHexString() == punk.owner){
-				 pairedV1 = true;
-				}
-			}
-
-	  let ogpunks = PunksOG.bind(Address.fromString('0x6Ba6f2207e343923BA692e5Cae646Fb0F566DB8D'));
-		let ownerAddressV1 = ogpunks.try_punkIndexToAddress(event.params.punkIndex);
-			if (!ownerAddressV1.reverted) {
-			  if(ownerAddressV1.value.toHexString() == punk.owner){
-				  pairedV1 = true;
-				}
-			}
-	  punk.pairedV1 = pairedV1;
+	updateV1Pair(event.params.punkIndex);
 
 
 	//Write
@@ -648,6 +593,7 @@ export function handlePunkBought(event: PunkBought): void {
 			)
 		}
 	}
+	updateV1Pair(event.params.punkIndex);
 }
 
 //This function is called for three events: Mint (Wrap), Burn (Unwrap) and Transfer
@@ -722,37 +668,18 @@ export function handleWrappedPunkTransfer(event: WrappedPunkTransfer): void {
 		punk.save()
 	}
 
-	// V1 wrapped punk
-	  let punk = Punk.load(event.params.tokenId.toString())!;
-	  let v1contract = V1PunksContract.bind(Address.fromString("0x282bdd42f4eb70e7a9d9f40c8fea0825b7f68c5d"));
-
-	  let pairedV1 = false;
-	  let owner = v1contract.try_ownerOf(event.params.tokenId);
-			if (!owner.reverted) {
-
-				if(owner.value.toHexString() == punk.owner){
-				  pairedV1 = true;
-				}
-			}
-
-	  let foobarcontract = FoobarContract.bind(Address.fromString("0xf4a4644e818c2843ba0aabea93af6c80b5984114"));
-	  let ownerfoobar = foobarcontract.try_ownerOf(event.params.tokenId);
-			if (!ownerfoobar.reverted) {
-				if(ownerfoobar.value.toHexString() == punk.owner){
-				 pairedV1 = true;
-				}
-			}
-
-	  let ogpunks = PunksOG.bind(Address.fromString('0x6Ba6f2207e343923BA692e5Cae646Fb0F566DB8D'));
-		let ownerAddressV1 = ogpunks.try_punkIndexToAddress(event.params.tokenId);
-			if (!ownerAddressV1.reverted) {
-			  if(ownerAddressV1.value.toHexString() == punk.owner){
-				  pairedV1 = true;
-				}
-			}
-	  punk.pairedV1 = pairedV1;
-	  punk.save();
+	updateV1Pair(event.params.tokenId);
 	contract.save()
+}
+
+// This function is called for three events: Mint (Wrap), Burn (Unwrap) and Transfer
+export function handleV1PunkTransfer(event: V1PunkTransfer): void {
+	log.info("handleV1PunksTransfer tokenId: {} from: {} to: {}", [
+		event.params.tokenId.toString(),
+		event.params.from.toHexString(),
+		event.params.to.toHexString(),
+	]);
+	updateV1Pair(event.params.tokenId);
 }
 
 // This function is called for three events: Mint (Wrap), Burn (Unwrap) and Transfer
@@ -765,14 +692,7 @@ export function handleFoobarPunkTransfer(event: FoobarTransfer): void {
 
   let contract = getOrCreateFoobarContract(event.address);
 
-  let punk = Punk.load(event.params.tokenId.toString())!;
-  if(punk.owner == event.params.to.toHexString()){
-    punk.pairedV1 = true;
-  } else{
-    punk.pairedV1 = false;
-  }
-
-  punk.save();
+  updateV1Pair(event.params.tokenId)
   contract.save();
 }
 
@@ -782,15 +702,7 @@ export function handleOGPunkTransfer(event: PunksOGTransfer): void {
     event.params.from.toHexString(),
     event.params.to.toHexString(),
   ]);
-  let punk = Punk.load(event.params.punkIndex.toString());
-  if(punk) {
-    if (punk.owner == event.params.to.toHexString()) {
-      punk.pairedV1 = true;
-    } else {
-      punk.pairedV1 = false;
-    }
-    punk.save();
-  }
+	updateV1Pair(event.params.punkIndex);
 
 }
 
@@ -798,16 +710,8 @@ export function handleOGAssign(event: OGAssign): void {
   log.debug("handleOGAssign from: {} to: {}", [
     event.params.to.toHexString(),
   ]);
-  let punk = Punk.load(event.params.punkIndex.toString());
-  if(punk) {
-    if (punk.owner == event.params.to.toHexString()) {
-      punk.pairedV1 = true;
-    } else {
-      punk.pairedV1 = false;
-    }
 
-    punk.save();
-  }
+  updateV1Pair(event.params.punkIndex);
 }
 
 
@@ -819,4 +723,40 @@ export function handleProxyRegistered(event: ProxyRegistered): void {
 	userProxy.blockNumber = event.block.number
 	userProxy.blockHash = event.block.hash
 	userProxy.save()
+}
+
+function updateV1Pair(tokenId: BigInt) : void {
+	let punk = Punk.load(tokenId.toString());
+	if(punk) {
+		let v1contract = V1PunksContract.bind(Address.fromString("0x282bdd42f4eb70e7a9d9f40c8fea0825b7f68c5d"));
+
+		let pairedV1 = false;
+		let owner = v1contract.try_ownerOf(tokenId);
+		if (!owner.reverted) {
+
+			if (owner.value.toHexString() == punk.owner) {
+				pairedV1 = true;
+			}
+		}
+
+		let foobarcontract = FoobarContract.bind(Address.fromString("0xf4a4644e818c2843ba0aabea93af6c80b5984114"));
+		let ownerfoobar = foobarcontract.try_ownerOf(tokenId);
+		if (!ownerfoobar.reverted) {
+			if (ownerfoobar.value.toHexString() == punk.owner) {
+				pairedV1 = true;
+			}
+		}
+
+		let ogpunks = PunksOG.bind(Address.fromString('0x6Ba6f2207e343923BA692e5Cae646Fb0F566DB8D'));
+		let ownerAddressV1 = ogpunks.try_punkIndexToAddress(tokenId);
+		if (!ownerAddressV1.reverted) {
+			if (ownerAddressV1.value.toHexString() == punk.owner) {
+				pairedV1 = true;
+			}
+		}
+		punk.pairedV1 = pairedV1;
+
+		//Write
+		punk.save()
+	}
 }
