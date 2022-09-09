@@ -63,9 +63,7 @@ import {
 import {
 	getOrCreateCryptoPunkContract,
 	getOrCreateWrappedPunkContract,
-	updateContractAggregates,
-	getOrCreateV1PunkContract,
-  	getOrCreateFoobarContract
+	updateContractAggregates
 } from '../src/helpers/contractHelper'
 
 import { createWrap, createUnwrap } from '../src/helpers/wrapAndUnwrap'
@@ -690,10 +688,7 @@ export function handleFoobarPunkTransfer(event: FoobarTransfer): void {
     event.params.to.toHexString(),
   ]);
 
-  let contract = getOrCreateFoobarContract(event.address);
-
-  updateV1Pair(event.params.tokenId)
-  contract.save();
+  updateV1Pair(event.params.tokenId);
 }
 
 
