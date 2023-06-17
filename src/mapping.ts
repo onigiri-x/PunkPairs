@@ -1,4 +1,4 @@
-import { Address, BigInt, log } from '@graphprotocol/graph-ts'
+import {Address, BigInt, Bytes, log} from '@graphprotocol/graph-ts'
 import {
 	Assign as Assigned,
 	PunkTransfer,
@@ -30,7 +30,7 @@ import {
 } from "../generated/PunksOG/PunksOG";
 
 import { getTrait } from './traits'
-import { Punk, Trait, MetaData, UserProxy, Ask, Bid } from '../generated/schema'
+import {Punk, Trait, MetaData, UserProxy, Ask, Bid, PunkPairingEvent} from '../generated/schema'
 import {
 	ZERO_ADDRESS,
 	WRAPPED_PUNK_ADDRESS,
@@ -264,7 +264,7 @@ export function handlePunkTransfer(event: PunkTransfer): void {
 		punk.save()
 	}
 
-	updateV1Pair(event.params.punkIndex);
+	updateV1Pair(event.params.punkIndex, event.transaction.hash, event.block.timestamp);
 }
 
 export function handlePunkOffered(event: PunkOffered): void {
@@ -399,7 +399,7 @@ export function handlePunkBidWithdrawn(event: PunkBidWithdrawn): void {
 
 	// V1 punk pair
 
-	updateV1Pair(event.params.punkIndex);
+	updateV1Pair(event.params.punkIndex, event.transaction.hash, event.block.timestamp);
 
 
 	//Write
@@ -591,7 +591,7 @@ export function handlePunkBought(event: PunkBought): void {
 			)
 		}
 	}
-	updateV1Pair(event.params.punkIndex);
+	updateV1Pair(event.params.punkIndex, event.transaction.hash, event.block.timestamp);
 }
 
 //This function is called for three events: Mint (Wrap), Burn (Unwrap) and Transfer
@@ -666,7 +666,7 @@ export function handleWrappedPunkTransfer(event: WrappedPunkTransfer): void {
 		punk.save()
 	}
 
-	updateV1Pair(event.params.tokenId);
+	updateV1Pair(event.params.tokenId, event.transaction.hash, event.block.timestamp);
 	contract.save()
 }
 
@@ -677,7 +677,7 @@ export function handleV1PunkTransfer(event: V1PunkTransfer): void {
 		event.params.from.toHexString(),
 		event.params.to.toHexString(),
 	]);
-	updateV1Pair(event.params.tokenId);
+	updateV1Pair(event.params.tokenId, event.transaction.hash, event.block.timestamp);
 }
 
 // This function is called for three events: Mint (Wrap), Burn (Unwrap) and Transfer
@@ -688,7 +688,7 @@ export function handleFoobarPunkTransfer(event: FoobarTransfer): void {
     event.params.to.toHexString(),
   ]);
 
-  updateV1Pair(event.params.tokenId);
+  updateV1Pair(event.params.tokenId, event.transaction.hash, event.block.timestamp);
 }
 
 
@@ -697,7 +697,7 @@ export function handleOGPunkTransfer(event: PunksOGTransfer): void {
     event.params.from.toHexString(),
     event.params.to.toHexString(),
   ]);
-	updateV1Pair(event.params.punkIndex);
+	updateV1Pair(event.params.punkIndex, event.transaction.hash, event.block.timestamp);
 
 }
 
@@ -706,7 +706,7 @@ export function handleOGAssign(event: OGAssign): void {
     event.params.to.toHexString(),
   ]);
 
-  updateV1Pair(event.params.punkIndex);
+  updateV1Pair(event.params.punkIndex, event.transaction.hash, event.block.timestamp);
 }
 
 
@@ -720,7 +720,7 @@ export function handleProxyRegistered(event: ProxyRegistered): void {
 	userProxy.save()
 }
 
-function updateV1Pair(tokenId: BigInt) : void {
+function updateV1Pair(tokenId: BigInt, tx: Bytes, timestamp: BigInt) : void {
 	let punk = Punk.load(tokenId.toString());
 	if(punk) {
 		let v1contract = V1PunksContract.bind(Address.fromString("0x282bdd42f4eb70e7a9d9f40c8fea0825b7f68c5d"));
@@ -748,6 +748,17 @@ function updateV1Pair(tokenId: BigInt) : void {
 			if (ownerAddressV1.value.toHexString() == punk.owner) {
 				pairedV1 = true;
 			}
+		}
+
+		if(punk.pairedV1 !== pairedV1 ){
+			// This is an event that will change the status of the pairedV1
+			let pairEvent = new PunkPairingEvent(tokenId.toString()+tx.toHexString());
+			pairEvent.wasPaired = pairedV1;
+			pairEvent.timestamp = timestamp;
+			pairEvent.punkId = tokenId;
+			pairEvent.txHash = tx;
+			pairEvent.pairOwner = pairedV1? punk.owner : null;
+			pairEvent.save();
 		}
 		punk.pairedV1 = pairedV1;
 

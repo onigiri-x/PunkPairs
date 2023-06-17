@@ -603,3 +603,12 @@ type EpnsPushNotification @entity {
   recipient: String!
   notification: String!
 }
+
+type PunkPairingEvent @entity {
+    id: ID!
+    punkId: BigInt!
+    txHash: Bytes!
+    timestamp: BigInt!
+    wasPaired: Boolean!
+    pairOwner: Account
+}
